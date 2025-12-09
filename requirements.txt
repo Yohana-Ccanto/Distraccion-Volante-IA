@@ -2,3 +2,4 @@ Flask
 ultralytics
 Pillow
 pandas
+gunicorn
