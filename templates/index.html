@@ -199,6 +199,56 @@
         #probabilities-section {
             display: none;
         }
+        /* --- SECCIÓN DE CÁMARA (NUEVOS ESTILOS) --- */
+        .camera-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 25px;
+        }
+
+        .camera-controls {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+            width: 100%;
+            justify-content: center;
+        }
+
+        .action-button {
+            padding: 10px 15px;
+            font-size: 1em;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background-color 0.3s, transform 0.2s;
+        }
+
+        .primary-btn {
+            background-color: var(--color-primary);
+            color: white;
+        }
+
+        .secondary-btn {
+            background-color: var(--color-secondary);
+            color: white;
+        }
+
+        .reset-btn {
+            background-color: var(--color-reset);
+            color: white;
+        }
+
+        .primary-btn:hover, .secondary-btn:hover, .reset-btn:hover {
+            transform: translateY(-2px);
+            opacity: 0.9;
+        }
+
+        /* Modificación para asegurar que el input file no se vea, pero siga siendo usable */
+        #file-input {
+            display: none;
+        }
 
     </style>
 </head>
@@ -209,13 +259,61 @@
             Detector de Distracción al Volante
         </h1>
         <p class="subtitle">Análisis de la conducción mediante Inteligencia Artificial (YOLOv8).</p>
-
+        <div class="camera-section" id="camera-section">
+            <video id="webcam-video" autoplay playsinline **muted** style="display: none; width: 100%; max-height: 350px; border-radius: 8px; border: 3px solid var(--color-secondary); object-fit: cover;"></video>
+            <canvas id="photo-canvas" style="display: none;"></canvas>
+            
+            <div class="camera-controls">
+                <button onclick="startCamera()" id="start-camera-button" class="action-button primary-btn">
+                    Iniciar Cámara (Webcam/Móvil)
+                </button>
+                <button onclick="takePhoto()" id="take-photo-button" class="action-button secondary-btn" style="display: none;">
+                    Tomar Foto
+                </button>
+                <button onclick="stopCamera()" id="stop-camera-button" class="action-button reset-btn" style="display: none;">
+                    Detener Cámara
+                </button>
+            </div>
+            
+            <p id="camera-status" class="subtitle" style="margin-top: 15px; color: #999;">O</p>
+        </div>
         <div class="upload-section" id="upload-box">
             <input type="file" id="file-input" accept="image/*" style="display: none;">
             <p id="upload-text">👆 Haz clic para subir una imagen o arrastra y suelta aquí</p>
             <img id="image-preview" class="image-preview" src="#" alt="Vista previa de la imagen">
         </div>
-        
+        <h2>⚙️ Ajustes de Análisis Adaptativo</h2>
+
+        <div class="analysis-settings" style="display: flex; gap: 25px; margin-bottom: 25px; align-items: flex-start; flex-wrap: wrap;">
+            
+            <div class="control-group" style="flex-basis: 45%;">
+                <label for="user_experience" style="font-weight: 600; display: block; margin-bottom: 5px; color: #555;">
+                    👤 Perfil del Conductor:
+                </label>
+                <select id="user_experience" name="user_experience" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 1em;">
+                    <option value="Principiante">1. Principiante (Más Riesgo)</option>
+                    <option value="Intermedio" selected>2. Intermedio (Estándar)</option>
+                    <option value="Avanzado">3. Avanzado (Menos Riesgo)</option>
+                </select>
+                <small style="color: #888;">Define la severidad de las alertas.</small>
+            </div>
+
+            <div class="control-group" style="flex-basis: 45%;">
+                <label for="threshold_slider" style="font-weight: 600; display: block; margin-bottom: 5px; color: #555;">
+                    🧠 Umbral de Confianza (Threshold):
+                </label>
+                <input type="range" 
+                    id="threshold_slider" 
+                    name="threshold" 
+                    min="0.1" 
+                    max="0.95" 
+                    step="0.05" 
+                    value="0.5"
+                    style="width: 100%; margin-bottom: 5px;">
+                <span id="threshold_value" style="font-weight: 700; color: var(--color-primary);">0.50</span>
+                <small style="display: block; color: #888;">(Más bajo = Más sensible a detecciones débiles)</small>
+            </div>
+        </div>
         <div class="button-group">
             <button onclick="predictImage()" id="predict-button" disabled>
                 Analizar Imagen
@@ -229,6 +327,11 @@
             <h2>Resultados del Análisis</h2>
             <div id="status-message" class="result-box warning" style="display: none;"></div>
             
+            <div class="data-item score-item">
+                <span>Puntuación de Seguridad (0-100):</span> 
+                <strong id="final-score">---</strong>
+            </div>
+
             <div class="data-item">
                 <span>Clase Predicha:</span> 
                 <strong id="predicted-class">---</strong>
@@ -237,6 +340,11 @@
             <div class="data-item">
                 <span>Confianza de la Predicción:</span> 
                 <strong id="confidence">---</strong>
+            </div>
+            
+            <div class="data-item impact-item" style="flex-direction: column; align-items: flex-start;">
+                <span style="font-weight: 600; margin-bottom: 5px;">Recomendación y Impacto:</span> 
+                <p id="impact-message" style="margin: 0; font-style: italic; color: #555;">---</p>
             </div>
             
             <div id="probabilities-section">
@@ -253,29 +361,255 @@
         const statusMessage = document.getElementById('status-message');
         const predictedClass = document.getElementById('predicted-class');
         const confidenceDisplay = document.getElementById('confidence');
+    // --- NUEVOS ELEMENTOS ---
+        const thresholdSlider = document.getElementById('threshold_slider');
+        const thresholdValueSpan = document.getElementById('threshold_value');
+        const userExperienceSelect = document.getElementById('user_experience');
+        
+        // --- LÓGICA DE VOZ Y AJUSTES HUMANOS ---
+        let voicesLoaded = false;
+        let selectedSpanishVoice = null;
+        const preferredDialects = [
+            'es-ES', // Español de España (a menudo tiene voces de alta calidad)
+            'es-MX', // Español de México
+            'es-US', // Español de Estados Unidos (usado por Google/Android)
+            'es'     // Catch-all para cualquier español
+        ];
 
-        // --- FUNCIÓN PARA LIMPIAR LA INTERFAZ (NUEVA FUNCIÓN) ---
-        function resetInterface() {
-            // 1. Limpiar el input de archivo
-            fileInput.value = '';
-
-            // 2. Restaurar el estado inicial del área de subida
-            imagePreview.style.display = 'none';
-            imagePreview.src = '#';
-            uploadText.style.display = 'block';
-
-            // 3. Desactivar y limpiar botones/resultados
-            predictButton.disabled = true;
-            statusMessage.style.display = 'none';
-            statusMessage.className = 'result-box warning';
+        function loadVoices() {
+            selectedSpanishVoice = null; // Reiniciar
+            const voices = window.speechSynthesis.getVoices();
             
-            predictedClass.textContent = '---';
-            confidenceDisplay.textContent = '---';
+            // Lista de nombres de voces comunes en español que suelen ser de alta calidad
+            // Dejamos la lista, pero priorizaremos el dialecto
+            const preferredNames = [
+                'Google español', 'Microsoft Helena', 'Microsoft Raul', 'Monica', 'Paulina'
+            ];
             
-            console.log('Interfaz reseteada.');
+            // 1. Intentar encontrar una voz por nombre
+            for (const name of preferredNames) {
+                selectedSpanishVoice = voices.find(voice => voice.name.includes(name));
+                if (selectedSpanishVoice) break;
+            }
+
+            // 2. Si no se encontró por nombre, buscar por dialecto
+            if (!selectedSpanishVoice) {
+                for (const lang of preferredDialects) {
+                    selectedSpanishVoice = voices.find(voice => voice.lang === lang);
+                    if (selectedSpanishVoice) break;
+                }
+            }
+
+            voicesLoaded = true;
+        }
+
+        // Cargar las voces
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.onvoiceschanged = loadVoices;
+            loadVoices(); 
         }
 
 
+        function speakMessage(textToSpeak, language = 'es-ES') {
+            if (!('speechSynthesis' in window)) {
+                console.warn("La API de Text-to-Speech no está soportada.");
+                return;
+            }
+            
+            if (!voicesLoaded) {
+                loadVoices(); // Intenta cargar de nuevo si es necesario
+            }
+
+            window.speechSynthesis.cancel();
+            
+            const utterance = new SpeechSynthesisUtterance(textToSpeak);
+            
+            // Asignar la voz y el idioma
+            if (selectedSpanishVoice) {
+                utterance.voice = selectedSpanishVoice;
+                utterance.lang = selectedSpanishVoice.lang; // Usa el idioma de la voz encontrada
+            } else {
+                utterance.lang = language; // Usa el idioma predeterminado si falla la selección
+                console.warn("No se encontró una voz de alta calidad; usando la voz predeterminada del navegador.");
+            }
+
+            // Ajustes para sonar más humano
+            utterance.pitch = 1.1; 
+            utterance.rate = 1.0;  
+
+            window.speechSynthesis.speak(utterance);
+        } 
+
+        // Lógica para actualizar el valor visible del slider
+        thresholdSlider.oninput = function() {
+            thresholdValueSpan.innerHTML = parseFloat(this.value).toFixed(2);
+        };
+        // --- NUEVAS VARIABLES DE CÁMARA ---
+        const webcamVideo = document.getElementById('webcam-video');
+        const photoCanvas = document.getElementById('photo-canvas');
+        const startCameraButton = document.getElementById('start-camera-button');
+        const takePhotoButton = document.getElementById('take-photo-button');
+        const stopCameraButton = document.getElementById('stop-camera-button');
+        const cameraStatus = document.getElementById('camera-status');
+        let currentStream = null; // Para guardar el stream y poder detenerlo
+
+// --- FUNCIÓN PARA LIMPIAR LA INTERFAZ (MODIFICADA) ---
+        function resetInterface() {
+            // 1. Limpiar el input de archivo
+            fileInput.value = '';
+
+            // 2. Restaurar el estado inicial del área de subida
+            imagePreview.style.display = 'none';
+            imagePreview.src = '#';
+            uploadText.style.display = 'block';
+            uploadBox.style.display = 'block'; // Asegura que la caja de subida esté visible
+            
+            // 3. Limpieza de cámara (NUEVO)
+            stopCamera();
+            startCameraButton.style.display = 'block';
+            takePhotoButton.style.display = 'none';
+            stopCameraButton.style.display = 'none';
+            cameraStatus.textContent = 'O';
+
+            // 4. Desactivar y limpiar botones/resultados
+            predictButton.disabled = true;
+            statusMessage.style.display = 'none';
+            statusMessage.className = 'result-box warning';
+            
+            predictedClass.textContent = '---';
+            confidenceDisplay.textContent = '---';
+            
+            console.log('Interfaz reseteada.');
+        }
+    // --- FUNCIONES DE CÁMARA (Nuevas) ---
+
+        /**
+         * Inicia la cámara y muestra el stream en el elemento <video>.
+         */
+        // --- FUNCIÓN PARA INICIAR LA CÁMARA (Mejorada para manejo de errores) ---
+        function startCamera() {
+            // 1. Limpieza inicial de interfaz y mensajes
+            resetInterface(); 
+            cameraStatus.textContent = 'Iniciando cámara... por favor, acepta los permisos.';
+            startCameraButton.disabled = true; // ⭐ NUEVO: Desactivar el botón para evitar clics múltiples
+
+            // Opciones para solicitar la cámara trasera (por defecto)
+            let constraints = {
+                video: {
+                    width: { ideal: 640 }, // Usamos ideal para mejor compatibilidad
+                    height: { ideal: 480 },
+                    facingMode: "environment" // Cámara trasera
+                }
+            };
+
+            // Función que intenta acceder a la cámara
+            const attemptCameraAccess = (currentConstraints, isFallback = false) => {
+                navigator.mediaDevices.getUserMedia(currentConstraints)
+                    .then(stream => {
+                        currentStream = stream;
+                        webcamVideo.srcObject = stream;
+                        webcamVideo.style.display = 'block';
+                        uploadBox.style.display = 'none'; // Oculta la sección de subida
+                        
+                        // ⭐ Manejo correcto de botones al éxito
+                        startCameraButton.style.display = 'none';
+                        startCameraButton.disabled = false; 
+                        takePhotoButton.style.display = 'block';
+                        stopCameraButton.style.display = 'block';
+                        
+                        const cameraType = isFallback ? 'frontal' : 'trasera';
+                        cameraStatus.innerHTML = `✅ Cámara ${cameraType} activa. **Toma una foto para analizar.**`;
+                    })
+                    .catch(error => {
+                        // Si el primer intento (trasera) falla, intentar el segundo (frontal)
+                        if (!isFallback) {
+                            console.warn("Fallo al acceder a la cámara trasera. Intentando frontal...", error);
+                            let fallbackConstraints = {
+                                video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+                            };
+                            attemptCameraAccess(fallbackConstraints, true);
+                            return;
+                        }
+                        
+                        // ⭐ Si ambos fallan (Error definitivo)
+                        console.error("Error definitivo al acceder a la cámara.", error);
+                        startCameraButton.disabled = false; // Volver a habilitar el botón
+                        cameraStatus.innerHTML = '❌ Error: No se pudo acceder a ninguna cámara.<br>Asegúrate de que la cámara esté conectada y que **diste permiso** al navegador.';
+                        uploadBox.style.display = 'block'; // Mostrar de nuevo la opción de subir
+                        
+                        // Restaurar botones a estado inicial
+                        startCameraButton.style.display = 'block';
+                        takePhotoButton.style.display = 'none';
+                        stopCameraButton.style.display = 'none';
+                    });
+            };
+
+            attemptCameraAccess(constraints); // Iniciar el intento
+        }
+
+        /**
+         * Detiene el stream de la cámara.
+         */
+        function stopCamera() {
+            if (currentStream) {
+                currentStream.getTracks().forEach(track => track.stop());
+                currentStream = null;
+                webcamVideo.srcObject = null;
+            }
+            webcamVideo.style.display = 'none';
+            startCameraButton.style.display = 'block';
+            takePhotoButton.style.display = 'none';
+            stopCameraButton.style.display = 'none';
+            uploadBox.style.display = 'block'; // Muestra de nuevo la sección de subida
+            cameraStatus.textContent = 'O';
+        }
+
+        /**
+         * Captura un frame del video y lo convierte en archivo para análisis.
+         */
+        function takePhoto() {
+            if (!currentStream) {
+                alert("Primero inicia la cámara.");
+                return;
+            }
+            
+            const context = photoCanvas.getContext('2d');
+            
+            // Asegura que el canvas tenga el mismo tamaño que el video para la captura
+            photoCanvas.width = webcamVideo.videoWidth;
+            photoCanvas.height = webcamVideo.videoHeight;
+            
+            context.drawImage(webcamVideo, 0, 0, photoCanvas.width, photoCanvas.height);
+            
+            // Detiene la cámara inmediatamente después de tomar la foto
+            stopCamera(); 
+            
+            // Convierte la imagen del canvas a Blob (formato de archivo)
+            photoCanvas.toBlob(function(blob) {
+                if (blob) {
+                    // Crea un objeto File temporal para simular la subida
+                    const photoFile = new File([blob], 'captured_image.png', { type: 'image/png' });
+                    
+                    // Crea un DataTransfer y asigna el archivo al input (simulando una subida)
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(photoFile);
+                    fileInput.files = dataTransfer.files;
+
+                    // Muestra la imagen capturada en el área de vista previa
+                    imagePreview.src = URL.createObjectURL(photoFile);
+                    imagePreview.style.display = 'block';
+                    uploadText.style.display = 'none';
+                    
+                    // Habilita el botón de predicción
+                    predictButton.disabled = false;
+                    
+                    cameraStatus.textContent = 'Foto capturada, lista para analizar.';
+                    
+                } else {
+                    cameraStatus.textContent = '❌ Error al procesar la foto.';
+                }
+            }, 'image/png');
+        }
         // --- MANEJO DE ARCHIVOS Y DRAG & DROP ---
 
         function handleFile(file) {
@@ -300,16 +634,20 @@
         }
 
         // Evento de selección de archivo normal
-        fileInput.onchange = function(event) {
-            handleFile(event.target.files[0]);
-        };
-        
-        // Permite hacer clic en el área de subida
-        uploadBox.addEventListener('click', () => {
-            fileInput.click();
-        });
-
-
+        fileInput.onchange = function(event) {
+            // Aseguramos detener la cámara si se sube un archivo manualmente
+            stopCamera(); 
+            handleFile(event.target.files[0]);
+            uploadBox.style.display = 'block'; // Aseguramos que la caja de subida esté visible
+        };
+        
+        // Permite hacer clic en el área de subida
+        uploadBox.addEventListener('click', () => {
+            // Solo permitimos el click si la cámara no está activa
+            if (currentStream) return; 
+            fileInput.click();
+        });
+   
         // Eventos Drag and Drop
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             uploadBox.addEventListener(eventName, preventDefaults, false);
@@ -345,7 +683,11 @@
             const file = fileInput.files[0];
             if (!file) return;
 
-            // Mostrar mensaje de carga
+            // Obtener los nuevos valores del Perfil y Umbral
+            const thresholdValue = thresholdSlider.value;
+            const userExperience = userExperienceSelect.value;
+            
+            // ... (Mostrar mensaje de carga, etc.) ...
             statusMessage.style.display = 'block';
             statusMessage.className = 'result-box warning';
             statusMessage.innerHTML = '<span>⏳</span> Analizando... por favor, espera.';
@@ -354,6 +696,9 @@
 
             const formData = new FormData();
             formData.append('file', file);
+            // **Añadir los nuevos datos al FormData**
+            formData.append('threshold', thresholdValue); 
+            formData.append('user_experience', userExperience);
 
             fetch('/predict', {
                 method: 'POST',
@@ -368,17 +713,60 @@
             .then(data => {
                 predictButton.disabled = false;
                 
-                // Actualizar resultados
+                // Actualizar resultados básicos
                 predictedClass.textContent = data.class_name;
                 confidenceDisplay.textContent = data.confidence;
                 
-                statusMessage.className = `result-box ${data.message_type}`;
-                statusMessage.innerHTML = `<span>${data.message_type === 'success' ? '✅' : '🚨'}</span> ${data.message}`;
+                // **NUEVO: Actualizar resultados de Perfil de Riesgo**
+                const finalScore = document.getElementById('final-score');
+                const impactMessage = document.getElementById('impact-message');
+                
+                // Asignar color al score (Verde >= 80, Amarillo 40-79, Rojo < 40)
+                let scoreColor;
+                if (data.final_score >= 80) {
+                    scoreColor = 'var(--color-safe)'; // Score alto = Riesgo bajo
+                } else if (data.final_score >= 40) {
+                    scoreColor = 'var(--color-warning)';
+                } else {
+                    scoreColor = 'var(--color-danger)'; // Score bajo = Riesgo crítico
+                }
+                
+                finalScore.textContent = `${data.final_score}/100`;
+                finalScore.style.color = scoreColor;
+                impactMessage.textContent = data.impact_message;
 
+                // Actualizar mensaje de estado general
+                // Usamos el 'message_type' (ej. 'critico', 'alto') para el color del box
+                let icon = data.final_score >= 80 ? '✅' : '🚨';
+                statusMessage.className = `result-box ${data.message_type === 'bajo' || data.message_type === 'moderado' ? 'warning' : 'error'}`;
+                statusMessage.innerHTML = `<span>${icon}</span> ${data.message}`;
+                // ** FUNCIONALIDAD DE VOZ: LECTURA DE TODO EL ANÁLISIS **
+                // ----------------------------------------------------
+
+                // 1. Crear el mensaje detallado para la voz
+                let voiceMessage = `Análisis de Conducción. `;
+
+                // --- A. Clasificación del Estado ---
+                if (data.risk_level === 'Bajo') {
+                    voiceMessage += `Resultado exitoso: ${data.class_name}. `;
+                } else {
+                    // Para riesgo moderado, alto y crítico.
+                    voiceMessage += `¡Alerta, Riesgo ${data.risk_level}! El sistema detecta: ${data.class_name}. `;
+                }
+
+                // --- B. Puntuación de Riesgo ---
+                voiceMessage += `Puntuación de seguridad: ${data.final_score} de 100. `;
+
+                // --- C. Mensaje de Impacto Adaptativo ---
+                // Usamos el mensaje de impacto del servidor que incluye la adaptación por perfil.
+                voiceMessage += `Mensaje de impacto: ${data.impact_message}.`;
+
+                // 2. Llamar a la función de voz
+                speakMessage(voiceMessage);
             })
             .catch(error => {
+                // ... (Tu manejo de errores existente) ...
                 predictButton.disabled = false;
-                // Manejar errores JSON del servidor o errores de red
                 const errorMessage = error.error || 'Error de conexión con el servidor o archivo no válido.';
                 statusMessage.className = 'result-box error';
                 statusMessage.innerHTML = `<span>❌</span> Error: ${errorMessage}`;
